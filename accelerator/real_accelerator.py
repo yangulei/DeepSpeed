@@ -50,7 +50,7 @@ def get_accelerator():
     accelerator_name = None
     ds_set_method = None
     # 1. Detect whether there is override of DeepSpeed accelerators from environment variable.
-    DS_ACCELERATOR_LIST = ['cuda', 'cpu', 'xpu', 'npu', 'mps']
+    DS_ACCELERATOR_LIST = ['cuda', 'cpu', 'xpu', 'npu', 'mps', 'hpu']
     if "DS_ACCELERATOR" in os.environ.keys():
         accelerator_name = os.environ["DS_ACCELERATOR"]
         if accelerator_name == "xpu":
@@ -79,6 +79,12 @@ def get_accelerator():
                 torch.mps.current_allocated_memory()
             except (RuntimeError, ImportError) as e:
                 raise ValueError(f"MPS_Accelerator requires torch.mps, which is not installed on this system.")
+        elif accelerator_name == "hpu":
+            try:
+                import habana_frameworks.torch.hpu  # noqa: F401
+            except ImportError as e:
+                raise ValueError(
+                    f"HPU_Accelerator requires habana_frameworks.torch.hpu, which is not installed on this system.")
         elif accelerator_name == "cuda":
             pass
         else:
@@ -129,6 +135,13 @@ def get_accelerator():
             except (RuntimeError, ImportError) as e:
                 pass
         if accelerator_name == None:
+            try:
+                import habana_frameworks.torch.hpu  # noqa: F401,F811
+
+                accelerator_name = "hpu"
+            except ImportError as e:
+                pass
+        if accelerator_name == None:
             accelerator_name = "cuda"
 
         ds_set_method = "auto detect"
@@ -153,6 +166,10 @@ def get_accelerator():
         from .mps_accelerator import MPS_Accelerator
 
         ds_accelerator = MPS_Accelerator()
+    elif accelerator_name == 'hpu':
+        from .hpu_accelerator import HPU_Accelerator
+
+        ds_accelerator = HPU_Accelerator()
     _validate_accelerator(ds_accelerator)
     if accel_logger is not None:
         accel_logger.info(f"Setting ds_accelerator to {ds_accelerator._name} ({ds_set_method})")

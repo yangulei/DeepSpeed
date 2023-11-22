@@ -9,6 +9,8 @@ import deepspeed
 from deepspeed.ops.op_builder import QuantizerBuilder
 from deepspeed.accelerator import get_accelerator
 
+pytestmark = pytest.mark.skipif(((bool(pytest.use_hpu) == True)), reason="Quantize kernel not supported by HPU.")
+
 if not deepspeed.ops.__compatible_ops__[QuantizerBuilder.NAME]:
     pytest.skip("Inference ops are not available on this system", allow_module_level=True)
 

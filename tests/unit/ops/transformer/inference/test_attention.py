@@ -27,7 +27,8 @@ def ref_torch_attention(q, k, v, mask, sm_scale):
 def test_attention(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     if not deepspeed.HAS_TRITON:
         pytest.skip("triton has to be installed for the test")
-
+    if bool(pytest.use_hpu) == True:
+        pytest.skip("HPU is not supported triton ops.")
     # skip autotune in testing
     from deepspeed.ops.transformer.inference.triton.matmul_ext import fp16_matmul
     fp16_matmul.skip_autotune()

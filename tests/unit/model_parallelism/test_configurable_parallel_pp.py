@@ -20,6 +20,9 @@ from deepspeed.runtime.utils import required_torch_version
 pytestmark = pytest.mark.skipif(not required_torch_version(min_version=1.5, max_version=1.13),
                                 reason='Megatron-LM package requires Pytorch version >=1.5 and <=1.13')
 
+pytestmark = pytest.mark.skipif(bool(pytest.use_hpu) == True,
+                                reason="Megatorn-LM package is not supported HPU backend")
+
 
 def get_deepspeed_model(model):
     ds_config_dict = {

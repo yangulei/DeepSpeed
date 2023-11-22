@@ -10,13 +10,14 @@
 
 import pytest
 import torch
+import os
 import deepspeed
 from deepspeed.accelerator import get_accelerator
 from deepspeed.ops.op_builder import SparseAttnBuilder
 from unit.util import skip_on_arch, skip_on_cuda
 
 if not deepspeed.ops.__compatible_ops__[SparseAttnBuilder.NAME]:
-    pytest.skip("sparse attention op is not compatible on this system", allow_module_level=True)
+    pytestmark = pytest.mark.skip(reason="sparse attention op is not compatible on this system")
 
 
 def dense_to_sparse(w, mask, block):
@@ -128,7 +129,14 @@ def init_softmax_inputs(Z, H, M, N, scale, rho, block, dtype, dense_x=True, layo
 def test_softmax(block, width, dtype):
     valid_cuda_versions = [101, 102, 110, 111]
     skip_on_arch(min_arch=7)
-    skip_on_cuda(valid_cuda=valid_cuda_versions)
+
+    if bool(pytest.use_hpu) == True:
+        import habana_frameworks.torch.core as htcore  # noqa: F401
+        if os.getenv("REPLACE_FP16", default=None):
+            if dtype == torch.float16:
+                dtype = torch.bfloat16
+    else:
+        skip_on_cuda(valid_cuda=valid_cuda_versions)
 
     Z = 2
     H = 4
@@ -234,7 +242,14 @@ testdata = [
 def test_matmul(block, dtype, mode, trans_a, trans_b):
     valid_cuda_versions = [101, 102, 110, 111]
     skip_on_arch(min_arch=7)
-    skip_on_cuda(valid_cuda=valid_cuda_versions)
+
+    if bool(pytest.use_hpu) == True:
+        import habana_frameworks.torch.core as htcore  # noqa: F401
+        if os.getenv("REPLACE_FP16", default=None):
+            if dtype == torch.float16:
+                dtype = torch.bfloat16
+    else:
+        skip_on_cuda(valid_cuda=valid_cuda_versions)
 
     Z = 3
     H = 2

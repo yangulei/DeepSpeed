@@ -8,7 +8,7 @@ from deepspeed.runtime.utils import required_torch_version
 
 from unit.common import DistributedTest
 from unit.simple_model import *
-
+from unit.hpu import *
 from unit.checkpoint.common import checkpoint_correctness_verification
 
 import pytest
@@ -24,7 +24,15 @@ class TestMoECheckpoint(DistributedTest):
 
         config_dict = {"train_batch_size": 8, "steps_per_print": 1, "fp16": {"enabled": True}}
         hidden_dim = 16
-
+        fp16 = config_dict["fp16"]["enabled"]
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["fp32"] = {"enabled": True}
+                fp16 = False
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         models = [SimpleMoEModel(hidden_dim=hidden_dim, num_experts=ep_size, ep_size=ep_size) for _ in range(2)]
         optimizers = [torch.optim.AdamW(params=model.parameters()) for model in models]
         checkpoint_correctness_verification(config_dict,
@@ -33,11 +41,12 @@ class TestMoECheckpoint(DistributedTest):
                                             tmpdir=tmpdir,
                                             load_optimizer_states=True,
                                             load_lr_scheduler_states=False,
-                                            fp16=config_dict["fp16"]["enabled"],
+                                            fp16=fp16,
                                             empty_tag=True,
                                             base_optimizers=optimizers,
                                             seq_dataloader=True)
 
+    @pytest.mark.xfail(bool(pytest.use_hpu) == True, reason="xfail, due to SW-116160")
     @pytest.mark.parametrize("ep_size, load_optim_states", [(4, True), (4, False), (2, True), (2, False)])
     def test_checkpoint_moe_and_zero(self, tmpdir, ep_size, load_optim_states):
         if not required_torch_version(min_version=1.8):
@@ -64,6 +73,15 @@ class TestMoECheckpoint(DistributedTest):
             }
         }
         hidden_dim = 16
+        fp16 = config_dict["fp16"]["enabled"]
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["fp32"] = {"enabled": True}
+                fp16 = False
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         models = [SimpleMoEModel(hidden_dim=hidden_dim, num_experts=ep_size, ep_size=ep_size) for _ in range(2)]
         # param group must have a random unique name (for now)
@@ -77,7 +95,7 @@ class TestMoECheckpoint(DistributedTest):
                                             tmpdir=tmpdir,
                                             load_optimizer_states=load_optim_states,
                                             load_lr_scheduler_states=False,
-                                            fp16=config_dict["fp16"]["enabled"],
+                                            fp16=fp16,
                                             empty_tag=True,
                                             base_optimizers=optimizers,
                                             seq_dataloader=True)

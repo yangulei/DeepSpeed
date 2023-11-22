@@ -34,6 +34,7 @@ class TestClibGradNorm(DistributedTest):
         param1.grad = torch.Tensor([1])
         param2 = torch.nn.Parameter(torch.Tensor([0]))
         param2.grad = torch.Tensor([dist.get_rank() + 1])
+
         # param2 is now MoE parameter
         param2.allreduce = False
 

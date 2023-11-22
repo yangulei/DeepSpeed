@@ -3,12 +3,14 @@
 
 # DeepSpeed Team
 
+import os
 import torch
 import deepspeed
 import pytest
 from unit.common import DistributedTest
 from deepspeed.runtime.utils import required_torch_version
 from deepspeed.moe.layer import MoE
+from unit.hpu import *
 
 
 class MPU():
@@ -63,6 +65,14 @@ class TestMOETensorParallel(DistributedTest):
 
         config_dict = {"train_batch_size": 8, "steps_per_print": 1, "fp16": {"enabled": True}}
         hidden_dim = 16
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         tensor_parallel_expert = torch.nn.Sequential(torch.nn.Linear(hidden_dim, 4 * hidden_dim // tp_size),
                                                      torch.nn.ReLU(),

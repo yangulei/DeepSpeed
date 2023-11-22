@@ -5,10 +5,12 @@
 
 import torch
 import os
+import pytest
 import deepspeed
 from deepspeed.accelerator import get_accelerator
 from unit.common import DistributedTest
 from unit.simple_model import Curriculum_SimpleModel, SimpleModel, random_dataloader, random_dataset
+from unit.hpu import *
 
 
 class MPU():
@@ -103,9 +105,18 @@ class TestDataEfficiency(DistributedTest):
             assert 'dummy_metric' in data_sampler_state_dict['current_difficulties']
             return data
 
+        dtype = torch.half
+        if pytest.use_hpu == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         hidden_dim = 10
         model = SimpleModel(hidden_dim)
-        dataset = random_dataset(20, hidden_dim, torch.device('cpu'), dtype=torch.half)
+        dataset = random_dataset(20, hidden_dim, torch.device('cpu'), dtype=dtype)
         model, _, data_loader, _ = deepspeed.initialize(config=config_dict,
                                                         model=model,
                                                         training_data=dataset,
@@ -159,9 +170,23 @@ class TestLegacyCurriculumScheduler(DistributedTest):
         hidden_dim = 10
         ground_truths = {1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 3, 7: 4, 8: 4}
 
+        dtype = torch.half
+        if pytest.use_hpu == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
+
         model = Curriculum_SimpleModel(hidden_dim)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
-        data_loader = random_dataloader(model=model, total_samples=20, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=20,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
         for n, batch in enumerate(data_loader):
             loss, seqlen = model(batch[0], batch[1])
             model.backward(loss)
@@ -202,10 +227,23 @@ class TestLegacyCurriculumScheduler(DistributedTest):
         }
         hidden_dim = 10
         ground_truths = {1: 2, 2: 4, 3: 4, 4: 6, 5: 6, 6: 8, 7: 8, 8: 10, 9: 10, 10: 10}
+        dtype = torch.half
+        if pytest.use_hpu == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = Curriculum_SimpleModel(hidden_dim)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
-        data_loader = random_dataloader(model=model, total_samples=20, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=20,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
         for n, batch in enumerate(data_loader):
             loss, seqlen = model(batch[0], batch[1])
             model.backward(loss)

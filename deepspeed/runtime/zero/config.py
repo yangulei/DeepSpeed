@@ -22,6 +22,7 @@ ZeRO optimization should be enabled as:
     "stage3_max_reuse_distance" : 1000000000,
     "allgather_partitions": [true|false],
     "allgather_bucket_size": 500000000,
+    "max_group_size": 4e9,
     "reduce_scatter": [true|false],
     "contiguous_gradients" : [true|false]
     "overlap_comm": [true|false],
@@ -53,6 +54,7 @@ def read_zero_config_deprecated(param_dict):
     zero_config_dict["stage"] = 1 if param_dict[ZERO_OPTIMIZATION] else 0
     if zero_config_dict["stage"] > 0:
         zero_config_dict["allgather_bucket_size"] = get_scalar_param(param_dict, "allgather_size", 5e8)
+        zero_config_dict["max_group_size"] = get_scalar_param(param_dict, "max_group_size", -1)
     logger.warning(
         "DeepSpeedConfig: this format of ZeRO optimization setup is deprecated. Please use the following format: {}".
         format(ZERO_FORMAT))
@@ -96,7 +98,7 @@ class DeepSpeedZeroConfig(DeepSpeedConfigModel):
     memory fragmentation during backward pass.
     """
 
-    reduce_scatter: bool = True
+    reduce_scatter: bool = False
     """
     Uses reduce or reduce scatter instead of allreduce to average gradients
     """
@@ -123,6 +125,9 @@ class DeepSpeedZeroConfig(DeepSpeedConfigModel):
     """
     Attempts to overlap the reduction of the gradients with backward computation
     """
+
+    # TODO SW-97921: remove this WA code when SW-97305 is resolved
+    max_group_size: int = Field(4e9, ge=0)
 
     load_from_fp32_weights: bool = True
     """
@@ -189,7 +194,10 @@ class DeepSpeedZeroConfig(DeepSpeedConfigModel):
     ZeRO3-Offload, ZeRO-Infinity, and ZeRO-Inference.
     """
 
-    param_persistence_threshold: int = Field(pp_int(1e5), ge=0, alias="stage3_param_persistence_threshold")
+    #WA for SW-148986. Set param_persistence_threshold to 0 for zero inf
+    param_persistence_threshold: int = Field(
+        None, alias="stage3_param_persistence_threshold"
+    )  # None for dynamic default value (see validator `param_persistence_threshold_valid` below)
     """
     Do not partition parameters smaller than this threshold. Smaller values use
     less memory, but can greatly increase communication (especially
@@ -299,4 +307,15 @@ class DeepSpeedZeroConfig(DeepSpeedConfigModel):
         if field_value is None:
             assert ("stage" in values), "DeepSpeedZeroConfig: 'stage' must be defined before 'overlap_comm'"
             field_value = values["stage"] == ZeroStageEnum.weights
+        return field_value
+
+    @validator("param_persistence_threshold")
+    def param_persistence_threshold_valid(cls, field_value, values):
+        if field_value is None:
+            assert (
+                "offload_param"
+                in values), "DeepSpeedZeroConfig: 'offload_param' must be defined before 'param_persistence_threshold'"
+            field_value = pp_int(1e5)
+            if values["offload_param"] is not None and values["offload_param"].device != OffloadDeviceEnum.none:
+                field_value = 0
         return field_value

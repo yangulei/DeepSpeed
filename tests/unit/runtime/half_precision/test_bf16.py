@@ -12,13 +12,14 @@ from deepspeed.ops.op_builder import CPUAdamBuilder
 from unit.simple_model import SimpleModel, SimpleOptimizer, random_dataloader
 from unit.util import bf16_required_version_check
 from deepspeed import comm as dist
+from unit.hpu import *
 
 
 class TestAdamBF16ZeroOneCycleCompatibility(DistributedTest):
     world_size = 1
 
     def test(self, zero_stage=2, use_cpu_offload=False):
-        if not bf16_required_version_check():
+        if not bf16_required_version_check() and (not bool(pytest.use_hpu) == True):
             pytest.skip(
                 " DeepSpeed BFloat16 tests need torch >= 1.10, NCCL >= 2.10.3, CUDA > =11.0 and HW support for BFloat16 to run correctly"
             )
@@ -79,7 +80,7 @@ class TestZeroAllowUntestedOptimizer(DistributedTest):
     world_size = 1
 
     def test(self, zero_stage=2, use_cpu_offload=False):
-        if not bf16_required_version_check():
+        if not bf16_required_version_check() and (not bool(pytest.use_hpu) == True):
             pytest.skip(
                 " DeepSpeed BFloat16 tests need torch >= 1.10, NCCL >= 2.10.3, CUDA > =11.0 and HW support for BFloat16 to run correctly"
             )
@@ -117,7 +118,7 @@ class TestZeroEmptyPartition(DistributedTest):
     world_size = 3
 
     def test(self, zero_stage=2, use_cpu_offload=False):
-        if not bf16_required_version_check():
+        if not bf16_required_version_check() and (not bool(pytest.use_hpu) == True):
             pytest.skip(
                 " DeepSpeed BFloat16 tests need torch >= 1.10, NCCL >= 2.10.3, CUDA > =11.0 and HW support for BFloat16 to run correctly"
             )
@@ -175,10 +176,13 @@ class TestZeroSupportedClientOptimizer(DistributedTest):
     world_size = 1
 
     def test(self, optimizer_constructor, zero_stage=2):
-        if not bf16_required_version_check():
+        if not bf16_required_version_check() and (not bool(pytest.use_hpu) == True):
             pytest.skip(
                 " DeepSpeed BFloat16 tests need torch >= 1.10, NCCL >= 2.10.3, CUDA > =11.0 and HW support for BFloat16 to run correctly"
             )
+        if bool(pytest.use_hpu) == True:
+            if FusedAdam == optimizer_constructor:
+                pytest.skip("FusedADAM is not supported by HPU")
 
         config_dict = {
             "train_micro_batch_size_per_gpu": 2,
@@ -204,7 +208,7 @@ class TestZero2ReduceScatterOff(DistributedTest):
     world_size = 2
 
     def test(self):
-        if not bf16_required_version_check():
+        if not bf16_required_version_check() and (not bool(pytest.use_hpu) == True):
             pytest.skip(
                 " DeepSpeed BFloat16 tests need torch >= 1.10, NCCL >= 2.10.3, CUDA > =11.0 and HW support for BFloat16 to run correctly"
             )
@@ -253,7 +257,7 @@ class TestZeroEmptyGrad(DistributedTest):
     world_size = 1
 
     def test(self, stage=2):
-        if not bf16_required_version_check():
+        if not bf16_required_version_check() and (not bool(pytest.use_hpu) == True):
             pytest.skip(
                 " DeepSpeed BFloat16 tests need torch >= 1.10, NCCL >= 2.10.3, CUDA > =11.0 and HW support for BFloat16 to run correctly"
             )
@@ -294,11 +298,13 @@ class TestZeroDtypeCocktail(DistributedTest):
 
     def test(self, comp_type, comm_type):
         if comp_type == torch.bfloat16 or comm_type == torch.bfloat16:
-            if not bf16_required_version_check():
+            if not bf16_required_version_check() and (not bool(pytest.use_hpu) == True):
                 pytest.skip(
                     " DeepSpeed BFloat16 tests need torch >= 1.10, NCCL >= 2.10.3, CUDA > =11.0 and HW support for BFloat16 to run correctly"
                 )
-
+        if (comp_type == torch.float16) and (bool(pytest.use_hpu) == True):
+            if get_hpu_dev_version() == 'Gaudi':
+                pytest.skip("FP16 is not supported by Gaudi.")
         type_str = {torch.float16: "fp16", torch.bfloat16: "bfp16"}
 
         config_dict = {
@@ -318,6 +324,10 @@ class TestZeroDtypeCocktail(DistributedTest):
             config_dict["communication_data_type"] = type_str[comm_type]
         else:
             comm_type = comp_type
+        if (bool(pytest.use_hpu) == True):
+            # TODO: remove this when the following is resolved:
+            # https://jira.habana-labs.com/browse/SW-137450
+            config_dict["fp16"]["initial_scale_power"] = 30
         hidden_dim = 10
 
         model = SimpleModel(hidden_dim)

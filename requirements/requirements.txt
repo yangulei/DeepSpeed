@@ -1,7 +1,7 @@
 hjson
 ninja
 numpy
-packaging>=20.0
+packaging
 psutil
 py-cpuinfo
 pydantic<2.0.0

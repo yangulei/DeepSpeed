@@ -19,8 +19,13 @@ QUEUE_DEPTH = 2
 IO_SIZE = 4 * BLOCK_SIZE
 IO_PARALLEL = 2
 
+m_device = "hpu" if bool(pytest.use_hpu) else "cpu"
+
+if bool(pytest.use_hpu) == True:
+    import habana_frameworks.torch.core as htcore  # noqa: F401
+
 if not deepspeed.ops.__compatible_ops__[AsyncIOBuilder.NAME]:
-    pytest.skip('Skip tests since async-io is not compatible', allow_module_level=True)
+    pytestmark = pytest.mark.skip(reason='Skip tests since async-io is not compatible')
 
 
 def _skip_for_invalid_environment(use_cuda_device=True, use_cuda_pinned_tensor=True):
@@ -179,7 +184,12 @@ class TestWrite(DistributedTest):
         filecmp.clear_cache()
         assert filecmp.cmp(ref_file, aio_file, shallow=False)
 
-    @pytest.mark.parametrize("cuda_device", [True, False])
+    @pytest.mark.parametrize("cuda_device", [
+        True,
+        pytest.param(False,
+                     marks=pytest.mark.skipif(bool(pytest.use_hpu) == True,
+                                              reason="HPU not supported pinned memory with CPU device"))
+    ])
     def test_async_write(self, tmpdir, use_cuda_pinned_tensor, single_submit, overlap_events, cuda_device):
         _skip_for_invalid_environment(use_cuda_device=cuda_device, use_cuda_pinned_tensor=use_cuda_pinned_tensor)
 
@@ -214,7 +224,12 @@ class TestWrite(DistributedTest):
 
 @pytest.mark.sequential
 @pytest.mark.parametrize("use_cuda_pinned_tensor", [True, False])
-@pytest.mark.parametrize("cuda_device", [True, False])
+@pytest.mark.parametrize("cuda_device", [
+    True,
+    pytest.param(False,
+                 marks=pytest.mark.skipif(bool(pytest.use_hpu) == True,
+                                          reason="HPU not supported pinned memory with CPU device"))
+])
 class TestAsyncQueue(DistributedTest):
     world_size = 1
     requires_cuda_env = False

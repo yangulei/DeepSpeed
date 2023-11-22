@@ -6,6 +6,7 @@
 import math
 from collections import namedtuple
 from typing import Dict, List, NamedTuple, Set, Tuple
+import os
 import pytest
 import deepspeed.comm as dist
 import torch
@@ -24,6 +25,7 @@ from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from deepspeed.utils.zero_to_fp32 import load_state_dict_from_zero_checkpoint
 from deepspeed.runtime.zero.utils import ZeRORuntimeException
 from deepspeed.accelerator import get_accelerator
+from unit.hpu import *
 
 
 def run_unbalanced_gradients(model, data_loader):
@@ -76,10 +78,22 @@ class TestZeroUnbalancedGradients(DistributedTest):
             },
         }
         hidden_dim = 4
-
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         model = SimpleModel(hidden_dim=hidden_dim)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
-        data_loader = random_dataloader(model=model, total_samples=16, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=16,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
 
         run_unbalanced_gradients(model, data_loader)
 
@@ -110,6 +124,15 @@ class TestZero3RepeatForwardLoop(DistributedTest):
             },
         }
         hidden_dim = 4
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         class AlbertLikeModel(torch.nn.Module):
 
@@ -127,7 +150,11 @@ class TestZero3RepeatForwardLoop(DistributedTest):
 
         model = AlbertLikeModel(hidden_dim=hidden_dim)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
-        data_loader = random_dataloader(model=model, total_samples=16, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=16,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
 
         for i, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
@@ -188,6 +215,15 @@ class TestZeroToFP32(DistributedTest):
                 return self.cross_entropy_loss(hidden, y)
 
         hidden_dim = 3  # do not change
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         world_size = dist.get_world_size()
         # we want at least 2x layers as there are gpus to trigger round_robin_fp16_groups reshuffle in zero2
@@ -195,10 +231,15 @@ class TestZeroToFP32(DistributedTest):
         model = MyModel(hidden_dim=hidden_dim, n_layers=n_layers, freeze_params=freeze_params)
 
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
+
         # Flush zero stage 3 cache
         model.empty_partition_cache()
 
-        data_loader = random_dataloader(model=model, total_samples=16, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=16,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
 
         for i, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
@@ -276,6 +317,15 @@ class TestZeroToFP32(DistributedTest):
                 return self.cross_entropy_loss(hidden, y)
 
         hidden_dim = 3
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         world_size = dist.get_world_size()
         n_layers = world_size * 2
@@ -301,7 +351,11 @@ class TestZeroToFP32(DistributedTest):
         )
         model.empty_partition_cache()
 
-        data_loader = random_dataloader(model=model, total_samples=16, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=16,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
 
         for i, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
@@ -365,6 +419,15 @@ class TestIncorectAllgatherBucketSize(DistributedTest):
             },
         }
         hidden_dim = 4
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = SimpleModel(hidden_dim=hidden_dim)
         if allgather_bucket_size % 2 == 0:
@@ -400,6 +463,15 @@ class TestPartitionNcclAlignment(DistributedTest):
             },
         }
         hidden_dim = 4
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = SimpleModel(hidden_dim=hidden_dim)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
@@ -416,6 +488,15 @@ class TestPartitionNcclAlignment(DistributedTest):
 
 
 def _ds_initialize_for_param_partitioning_testing(model: Module, cfg: dict) -> DeepSpeedEngine:
+    if bool(pytest.use_hpu) == True:
+        if os.getenv("REPLACE_FP16", default=None):
+            if 'fp16' in cfg:
+                cfg["fp16"]["enabled"] = False
+                cfg["bf16"] = {"enabled": True}
+        hpu_flag, msg = is_hpu_supported(cfg)
+        if not hpu_flag:
+            pytest.skip(msg)
+
     ds_engine, _, _, _ = deepspeed.initialize(config=cfg, model=model, model_parameters=model.parameters())
 
     return ds_engine
@@ -695,6 +776,10 @@ class TestZero3ParamPartitioningBase(DistributedTest):
                 "pin_memory": True,
             }
 
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                fp16_enabled = False
+                cfg["fp16"]["enabled"] = False
         ds_engine = _ds_initialize_for_param_partitioning_testing(model, cfg)
         for i, weight in enumerate(weights):
             weight.ds_tensor.data = torch.full_like(weight.ds_tensor.data, (i + 1) * (1 + dist.get_rank()))
@@ -767,6 +852,10 @@ class TestZero3ParamPartitioningBase(DistributedTest):
             # dloss_wrt_layer2 = layer3 * hidden1
             # dloss_wrt_layer1 = layer3 * layer2 * x
 
+            if bool(pytest.use_hpu) == True:
+                dev = "hpu"
+            else:
+                dev = "cuda"
             grad_multiplier = 1 if zero_grad else (train_iter + 1)
             if dist.get_rank() == 0:
                 assert torch.allclose(
@@ -857,12 +946,24 @@ class TestZero3ParamPartitioningLargeParam(DistributedTest):
                 "loss_scale": 1.0,
             },
         }
-        with deepspeed.zero.Init(mem_efficient_linear=False, enabled=init_context_manager):
+        dtype = torch.float16
+        zero3_init_dtype = None
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                ds_config["fp16"]["enabled"] = False
+                ds_config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+                zero3_init_dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(ds_config)
+            if not hpu_flag:
+                pytest.skip(msg)
+
+        with deepspeed.zero.Init(dtype=zero3_init_dtype, mem_efficient_linear=False, enabled=init_context_manager):
             model = LargeParamModel()
         ds_engine = _ds_initialize_for_param_partitioning_testing(model, ds_config)
 
         for train_iter in range(3):  # test multiple iterations to cover prefetching
-            activation: Tensor = ds_engine(torch.ones(param_sz, dtype=torch.float16, device=ds_engine.device))
+            activation: Tensor = ds_engine(torch.ones(param_sz, dtype=dtype, device=ds_engine.device))
 
             partition_sz = math.ceil(param_sz / self.world_size)
             for rank_idx, start_idx in enumerate(range(0, param_sz, partition_sz)):
@@ -893,9 +994,12 @@ class TestZero3ParamPartitioningManyParams(DistributedTest):
 
             def __init__(self) -> None:
                 super().__init__()
-
+                device = None
+                if bool(pytest.use_hpu) == True:
+                    device = torch.device('hpu')
                 self.modulelist = ModuleList(
-                    EltwiseMultiplicationModule(weight=Parameter(torch.empty((param_sz, ), dtype=torch.float32)))
+                    EltwiseMultiplicationModule(
+                        weight=Parameter(torch.empty((param_sz, ), dtype=torch.float32, device=device))).to(device)
                     for _ in range(n_layers))
 
                 for layer_num, module in enumerate(self.modulelist):
@@ -936,6 +1040,15 @@ class TestZero3ParamPartitioningManyParams(DistributedTest):
                 "loss_scale": 1.0,
             },
         }
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                ds_cfg["fp16"]["enabled"] = False
+                ds_cfg["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(ds_cfg)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         with deepspeed.zero.Init(config=ds_cfg, mem_efficient_linear=False, enabled=init_context_manager):
             model = ManyParamModel()
@@ -943,12 +1056,11 @@ class TestZero3ParamPartitioningManyParams(DistributedTest):
         ds_engine = _ds_initialize_for_param_partitioning_testing(model, ds_cfg)
 
         for _ in range(3):  # test multiple iterations to cover prefetching
-            activations: List[Tensor] = ds_engine(
-                torch.ones((param_sz, ), dtype=torch.float16, device=ds_engine.device))
+            activations: List[Tensor] = ds_engine(torch.ones((param_sz, ), dtype=dtype, device=ds_engine.device))
             assert len(activations) == n_layers
 
             partition_sz = math.ceil(param_sz / self.world_size)
-            expected_activations = torch.empty(param_sz, dtype=torch.float16, device=ds_engine.device)
+            expected_activations = torch.empty(param_sz, dtype=dtype, device=ds_engine.device)
             for start_idx in range(0, param_sz, partition_sz):
                 expected_activations[start_idx:start_idx + partition_sz] = dist.get_rank()
 
@@ -976,8 +1088,11 @@ class TestZero3InitForParentWeightInitialization(DistributedTest):
 
             def __init__(self) -> None:
                 super().__init__()
-
-                self.linear = Linear(12, 1)
+                if bool(pytest.use_hpu) == True:
+                    dev = 'hpu'
+                else:
+                    dev = 'cuda'
+                self.linear = Linear(12, 1, device=dev)
 
                 self.apply(self.__init_weights)
 
@@ -1005,6 +1120,13 @@ class TestZero3InitForParentWeightInitialization(DistributedTest):
                 "loss_scale": 1.0,
             },
         }
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                ds_cfg["fp16"]["enabled"] = False
+                ds_cfg["bf16"] = {"enabled": True}
+            hpu_flag, msg = is_hpu_supported(ds_cfg)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         with deepspeed.zero.Init(config=ds_cfg, mem_efficient_linear=False, enabled=True):
             model = ModelWhereParentInitializesChildWeights()
@@ -1144,6 +1266,10 @@ class TestZero3ParamPartitioningBaseBF16(DistributedTest):
             # dloss_wrt_layer2 = layer3 * hidden1
             # dloss_wrt_layer1 = layer3 * layer2 * x
 
+            if bool(pytest.use_hpu) == True:
+                dev = "hpu"
+            else:
+                dev = "cuda"
             expected_grad_dtype = torch.float32 if offload_optimizer else torch.bfloat16
 
             grad_multiplier = 1 if zero_grad else (train_iter + 1)
@@ -1212,10 +1338,23 @@ class TestZeroOffloadStage1(DistributedTest):
             },
         }
         hidden_dim = 10
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = SimpleModel(hidden_dim)
         model, _, _, _ = deepspeed.initialize(model=model, model_parameters=model.parameters(), config=config_dict)
-        data_loader = random_dataloader(model=model, total_samples=50, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=50,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
         dist.barrier()
         for n, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
@@ -1245,6 +1384,17 @@ class TestZero3DictFwd(DistributedTest):
             },
         }
         hidden_dim = 10
+        dtype = torch.half
+        zero3_init_dtype = None
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+                zero3_init_dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         class MyModel(torch.nn.Module):
 
@@ -1266,11 +1416,15 @@ class TestZero3DictFwd(DistributedTest):
                     raise NotImplementedError
                 return val
 
-        with deepspeed.zero.Init():
+        with deepspeed.zero.Init(dtype=zero3_init_dtype):
             model = MyModel(hidden_dim)
 
         model, _, _, _ = deepspeed.initialize(model=model, model_parameters=model.parameters(), config=config_dict)
-        data_loader = random_dataloader(model=model, total_samples=50, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=50,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
         dist.barrier()
         for n, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
@@ -1309,12 +1463,25 @@ class TestZeroAdamOptimizerStepCount(DistributedTest):
             },
         }
         hidden_dim = 4
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = SimpleModel(hidden_dim=hidden_dim, nlayers=12)
         model, optimizer, _, _ = deepspeed.initialize(config=config_dict,
                                                       model=model,
                                                       model_parameters=model.parameters())
-        data_loader = random_dataloader(model=model, total_samples=16, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=16,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
 
         for i, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
@@ -1380,11 +1547,24 @@ class TestZeroFrozenWeights(DistributedTest):
                 val = (x, loss)
                 return val
 
-        with deepspeed.zero.Init(config_dict_or_path=config_dict, enabled=zero_stage == 3):
-            model = MyModel(hidden_dim)
+        dtype = torch.float16
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
+        with deepspeed.zero.Init(dtype=dtype, config_dict_or_path=config_dict, enabled=zero_stage == 3):
+            model = MyModel(hidden_dim)
         model, _, _, _ = deepspeed.initialize(model=model, model_parameters=model.parameters(), config=config_dict)
-        data_loader = random_dataloader(model=model, total_samples=50, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=50,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
         dist.barrier()
         for n, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
@@ -1414,7 +1594,13 @@ class TestZeroOffloadOptim(DistributedTest):
             "zero_force_ds_cpu_optimizer": force_ds_optim,
         }
         hidden_dim = 10
-
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         model = SimpleModel(hidden_dim)
 
         optimizer = torch.optim.Adam(model.parameters())
@@ -1443,6 +1629,15 @@ class TestZeroPartitionCache(DistributedTest):
                 "stage3_param_persistence_threshold": hidden_dim,
             },
         }
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         if training:
             config_dict["optimizer"] = {"type": "Adam"}
 
@@ -1451,7 +1646,6 @@ class TestZeroPartitionCache(DistributedTest):
 
         model, _, _, _ = deepspeed.initialize(model=model, config=config_dict)
 
-        dtype = torch.half
         data_loader = random_dataloader(
             model=model,
             total_samples=6,

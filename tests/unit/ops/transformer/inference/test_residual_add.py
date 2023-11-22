@@ -8,6 +8,7 @@ import torch
 import deepspeed
 from deepspeed.accelerator import get_accelerator
 from deepspeed.ops.op_builder import InferenceBuilder
+from deepspeed.ops.op_builder.torch_fallback_builder import TorchInferenceOpBuilder
 from .inference_test_utils import get_dtypes
 
 if not deepspeed.ops.__compatible_ops__[InferenceBuilder.NAME]:
@@ -36,9 +37,8 @@ def allclose(x, y):
     return torch.allclose(x, y, rtol=rtol, atol=atol)
 
 
-@pytest.fixture(scope="module")
-def inference_module():
-    return InferenceBuilder().load()
+def get_inference_modules():
+    return [InferenceBuilder().load(), TorchInferenceOpBuilder().load()]
 
 
 def res_add_bias_ref(hidden_state, residual, attn_output, attn_bias, final_bias, mp_size=1, pre_attn_norm=True):
@@ -66,6 +66,7 @@ def run_residual_add_reference(hidden_state, residual, attn_output, attn_bias, f
 
 
 @pytest.mark.inference_ops
+@pytest.mark.parametrize("inference_module", get_inference_modules())
 @pytest.mark.parametrize("batch", [1, 2])
 @pytest.mark.parametrize("sequence", [1, 128, 255])
 @pytest.mark.parametrize("hidden_dim", [512, 1232, 4096])
@@ -79,6 +80,8 @@ def test_residual_add(inference_module, batch, sequence, hidden_dim, dtype, mlp_
                       pre_attn_norm, use_triton_ops):
     if not deepspeed.HAS_TRITON and use_triton_ops and dtype == torch.float16:
         pytest.skip("triton has to be installed for the test")
+    if use_triton_ops and bool(pytest.use_hpu) == True:
+        pytest.skip("HPU is not supported triton ops.")
     ds_out = torch.randn((batch, sequence, hidden_dim), dtype=dtype, device=get_accelerator().device_name())
     residual = torch.randn((batch, sequence, hidden_dim), dtype=dtype, device=get_accelerator().device_name())
     attn_output = torch.randn((batch, sequence, hidden_dim), dtype=dtype, device=get_accelerator().device_name())

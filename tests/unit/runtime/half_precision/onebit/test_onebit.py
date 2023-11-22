@@ -32,6 +32,7 @@ rocm_version = OpBuilder.installed_rocm_version()
 if rocm_version[0] > 4:
     pytest.skip("NCCL-based 1-bit compression is not yet supported w. ROCm 5 until cupy supports ROCm 5",
                 allow_module_level=True)
+pytestmark = pytest.mark.skipif(bool(pytest.use_hpu) == True, reason="OneBit optimizer is  not supported by HPU")
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=["fp32", "fp16"])

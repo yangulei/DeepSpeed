@@ -34,6 +34,7 @@ def run_softmax_ds(input, use_triton_ops=False):
     assert use_triton_ops, "Only triton softmax is supported for now"
 
 
+@pytest.mark.skipif(bool(pytest.use_hpu) == True, reason="HPU is not supported triton ops..")
 @pytest.mark.inference_ops
 @pytest.mark.parametrize("batch", [1, 2])
 @pytest.mark.parametrize("sequence", [1, 128, 255, 1232])

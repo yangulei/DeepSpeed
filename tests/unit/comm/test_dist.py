@@ -164,6 +164,10 @@ class TestDistInitNoEnv(DistributedTest):
     set_dist_env = False
 
     def test(self):
+        backend = 'nccl'
+        if bool(pytest.use_hpu) == True:
+            import habana_frameworks.torch.distributed.hccl  # noqa: F401
+            backend = 'hccl'
         torch.distributed.init_process_group(backend=get_accelerator().communication_backend_name(),
                                              init_method=f"tcp://127.0.0.1:{get_master_port()}",
                                              world_size=1,

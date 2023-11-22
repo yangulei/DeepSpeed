@@ -7,12 +7,14 @@ from types import SimpleNamespace
 
 import torch
 import deepspeed
+import os
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus, partitioned_param_data_shape
 import deepspeed.comm as dist
 
 from unit.common import DistributedTest
 from unit.simple_model import SimpleModel
 from utils import setup_serial_env
+from unit.hpu import *
 
 
 # Test that no sub-class or super-class is missed
@@ -71,7 +73,16 @@ class TestZeroGatheredParametersFree(DistributedTest):
                 super(MyModel, self).__init__()
                 self.l1 = torch.nn.Linear(hidden_dim, hidden_dim)
 
-        with deepspeed.zero.Init(config_dict_or_path=config_dict):
+        dtype = None
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config["fp16"]["enabled"] = False
+                config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config)
+            if not hpu_flag:
+                pytest.skip(msg)
+        with deepspeed.zero.Init(config_dict_or_path=config_dict, dtype=dtype):
             model = MyModel(hidden_dim)
 
         with deepspeed.zero.GatheredParameters(list(model.parameters())):
@@ -88,7 +99,17 @@ class TestSerialContext(DistributedTest):
 
     def test_subclass_param(self):
         setup_serial_env()
-        with deepspeed.zero.Init(config=config):
+        dtype = None
+        if bool(pytest.use_hpu) == True:
+            use_hpu = True
+            if os.getenv("REPLACE_FP16", default=None):
+                config["fp16"]["enabled"] = False
+                config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config)
+            if not hpu_flag:
+                pytest.skip(msg)
+        with deepspeed.zero.Init(config=config, dtype=dtype):
             model = ConvNet()
 
         assert model.param.ds_status == ZeroParamStatus.NOT_AVAILABLE
@@ -215,7 +236,15 @@ class TestSerialContext(DistributedTest):
                 return C.sum()
 
         net = ExtLinear()
-
+        dtype = torch.float16
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config["fp16"]["enabled"] = False
+                config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config)
+            if not hpu_flag:
+                pytest.skip(msg)
         args = SimpleNamespace(local_rank=0)
         engine, optim, _, _ = deepspeed.initialize(args=args,
                                                    model=net,
@@ -225,7 +254,7 @@ class TestSerialContext(DistributedTest):
         with deepspeed.zero.GatheredParameters(net.linear1.weight):
             assert net.linear1.weight.numel() == net.dim**2
 
-        input = torch.rand(net.dim).to(engine.device).half()
+        input = torch.rand(net.dim).to(engine.device).to(dtype)
         loss = engine(input)
         engine.backward(loss)
         engine.step()
@@ -235,7 +264,16 @@ class TestScatterGather(DistributedTest):
     world_size = 2
 
     def test(self):
-        with deepspeed.zero.Init():
+        dtype = None
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config["fp16"]["enabled"] = False
+                config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config)
+            if not hpu_flag:
+                pytest.skip(msg)
+        with deepspeed.zero.Init(dtype=dtype):
             l = torch.nn.Linear(6, 3)
         assert l.weight.ds_status == ZeroParamStatus.NOT_AVAILABLE
         assert l.weight.shape == torch.Size(partitioned_param_data_shape)
@@ -254,7 +292,11 @@ class TestGatherUpdate(DistributedTest):
     world_size = 2
 
     def test(self):
-        with deepspeed.zero.Init():
+        dtype = torch.float16
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                dtype = torch.float32
+        with deepspeed.zero.Init(dtype=dtype):
             l = torch.nn.Linear(4, 2)
         assert l.weight.ds_status == ZeroParamStatus.NOT_AVAILABLE
 

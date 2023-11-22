@@ -13,6 +13,8 @@ from transformers import AutoConfig, AutoModelForCausalLM
 import deepspeed.comm as dist
 from huggingface_hub import snapshot_download
 from transformers.utils import is_offline_mode
+from deepspeed.module_inject.layers import LinearLayer, Normalize, LinearAllreduce, EmbeddingLayer
+from unit.hpu import *
 from deepspeed.ops.op_builder import InferenceBuilder
 
 if not deepspeed.ops.__compatible_ops__[InferenceBuilder.NAME]:
@@ -25,6 +27,9 @@ def check_dtype(model, expected_dtype):
         for child in module.children():
             if isinstance(child, DeepSpeedTransformerInference):
                 return child.attention.attn_qkvw.dtype
+            if isinstance(child,
+                          (LinearLayer, LinearAllreduce, Normalize, EmbeddingLayer)) and bool(pytest.use_hpu) == True:
+                return child.weight.dtype
             else:
                 found_dtype = find_dtype(child)
                 if found_dtype:
@@ -51,6 +56,11 @@ class save_shard(DistributedFixture):
     world_size = 2
 
     def run(self, model_name, class_tmpdir):
+        if bool(pytest.use_hpu) == True:
+            # FP16 is not supported on Gaudi1.
+            if get_hpu_dev_version() == "Gaudi":
+                pytest.skip(f"FP16 tests are not supported by Gaudi1.")
+
         # Only write a checkpoint if one does not exist
         if not os.path.isdir(os.path.join(class_tmpdir, model_name)):
             world_size = int(os.getenv("WORLD_SIZE", "1"))
@@ -74,6 +84,7 @@ class TestCheckpointShard(DistributedTest):
     world_size = 2
 
     def test(self, model_name, dtype, class_tmpdir, save_shard):
+
         world_size = int(os.getenv("WORLD_SIZE", "1"))
         inf_config = {
             "replace_with_kernel_inject": True,

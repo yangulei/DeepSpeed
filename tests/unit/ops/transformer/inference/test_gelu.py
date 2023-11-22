@@ -42,8 +42,11 @@ def run_gelu_ds(activations, use_triton_ops=False):
         from deepspeed.ops.transformer.inference.triton import gelu
         return gelu(activations)
 
+    device = 'cuda'
+    if bool(pytest.use_hpu) == True:
+        device = 'hpu'
     channels = activations.shape[-1]
-    bias = torch.zeros((channels), dtype=activations.dtype, device='cuda')
+    bias = torch.zeros((channels), dtype=activations.dtype, device=device)
     global inference_module
     if inference_module is None:
         inference_module = InferenceBuilder().load()
@@ -60,11 +63,16 @@ def run_gelu_ds(activations, use_triton_ops=False):
 @pytest.mark.parametrize("dtype", [torch.float16])
 @pytest.mark.parametrize("use_triton_ops", [True, False])
 def test_gelu(batch, sequence, channels, dtype, use_triton_ops):
-    activations_ds = torch.randn((batch, sequence, channels), dtype=dtype, device='cuda')
+    device = 'cuda'
+    if bool(pytest.use_hpu) == True:
+        device = 'hpu'
+    activations_ds = torch.randn((batch, sequence, channels), dtype=dtype, device=device)
     activations_ref = activations_ds.clone().detach()
 
     if not deepspeed.HAS_TRITON and use_triton_ops:
         pytest.skip("triton has to be installed for the test")
+    if use_triton_ops and bool(pytest.use_hpu) == True:
+        pytest.skip("HPU is not supported triton ops.")
     ds_out = run_gelu_ds(activations_ds, use_triton_ops)
     ref_out = run_gelu_reference(activations_ref)
     assert (allclose(ds_out, ref_out))

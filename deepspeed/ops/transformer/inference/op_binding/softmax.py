@@ -30,14 +30,19 @@ class SoftmaxOp(BaseOp):
         if os.environ.get('DS_KI_FALLBACK') == 'True':
             alibi = alibi[head_offset:head_offset + self.num_attention_heads_per_partition]
             input_dtype = attn_scores.dtype
+            attn_scores *= layer_scale
             if (triangular):
                 tri = ~torch.tril(torch.ones(attn_scores.size(), device=attn_scores.device)).to(bool)
-                attn_scores = torch.masked_fill(attn_scores * layer_scale, tri, torch.finfo(input_dtype).min)
+                attn_scores = torch.masked_fill(attn_scores, tri, torch.finfo(input_dtype).min)
             if alibi is not None:
                 attn_scores += alibi
             if attn_mask is not None:
                 # expand atten_mask from two dim into 4 dim, insert two dims in the middle
-                attn_mask = attn_mask[:, None, None, :]
+                if len(attn_mask.shape) == 2:
+                    # The above if statement was added because the mask was already 4D so this
+                    # expansion should be avoided as it expands to 6D and crashes later (in bloom
+                    # HE KI FB)
+                    attn_mask = attn_mask[:, None, None, :]
                 attn_scores += attn_mask
             output = F.softmax(attn_scores, dim=-1, dtype=torch.float32).to(input_dtype)
             return output

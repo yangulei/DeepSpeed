@@ -12,7 +12,7 @@ from unit.common import DistributedTest
 from unit.simple_model import *
 
 from unit.checkpoint.common import *
-
+from unit.hpu import *
 import pytest
 
 
@@ -43,7 +43,13 @@ class TestMiCSCheckpoint(DistributedTest):
                 "mics_shard_size": shard_size
             }
         }
-
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         hidden_dim = 10
         with deepspeed.zero.MiCS_Init(config_dict_or_path=config_dict):
             models = [SimpleModel(hidden_dim, empty_grad=False) for _ in range(2)]

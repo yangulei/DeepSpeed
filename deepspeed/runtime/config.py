@@ -167,6 +167,13 @@ def get_bfloat16_enabled(param_dict):
     return False
 
 
+def get_bfloat16_accumulate_grads_via_hooks(param_dict):
+    for key in [BFLOAT16, BFLOAT16_OLD]:
+        if key in param_dict.keys():
+            return get_scalar_param(param_dict[key], BFLOAT16_GRAD_ACC_VIA_HOOKS, BFLOAT16_GRAD_ACC_VIA_HOOKS_DEFAULT)
+    return False
+
+
 def get_fp16_master_weights_and_grads_enabled(param_dict):
     if get_fp16_enabled(param_dict):
         return get_scalar_param(param_dict[FP16], FP16_MASTER_WEIGHTS_AND_GRADS, FP16_MASTER_WEIGHTS_AND_GRADS_DEFAULT)
@@ -446,6 +453,8 @@ def get_pipeline_config(param_dict):
         "partition": "best",
         "seed_layers": False,
         "activation_checkpoint_interval": 0,
+        "pipe_partitioned": "auto",
+        "grad_partitioned": "auto",
     }
     config = default_pipeline
     for key, val in param_dict.get("pipeline", {}).items():
@@ -488,6 +497,10 @@ def get_zero_allow_untested_optimizer(param_dict):
 
 def get_zero_force_ds_cpu_optimizer(param_dict):
     return get_scalar_param(param_dict, ZERO_FORCE_DS_CPU_OPTIMIZER, ZERO_FORCE_DS_CPU_OPTIMIZER_DEFAULT)
+
+
+def get_zero_allow_comm_data_type_fp32(param_dict):
+    return get_scalar_param(param_dict, ZERO_ALLOW_COMM_DATA_TYPE_FP32, ZERO_ALLOW_COMM_DATA_TYPE_FP32_DEFAULT)
 
 
 def get_scheduler_name(param_dict):
@@ -802,6 +815,7 @@ class DeepSpeedConfig(object):
         self.fp16_enabled = get_fp16_enabled(param_dict)
         self.fp16_auto_cast = get_fp16_auto_cast(param_dict)
         self.bfloat16_enabled = get_bfloat16_enabled(param_dict)
+        self.bfloat16_accumulate_grads_via_hooks = get_bfloat16_accumulate_grads_via_hooks(param_dict)
         assert not (self.fp16_enabled
                     and self.bfloat16_enabled), 'bfloat16 and fp16 modes cannot be simultaneously enabled'
         self.fp16_master_weights_and_gradients = get_fp16_master_weights_and_grads_enabled(param_dict)
@@ -821,6 +835,7 @@ class DeepSpeedConfig(object):
         self.optimizer_legacy_fusion = get_optimizer_legacy_fusion(param_dict)
 
         self.zero_allow_untested_optimizer = get_zero_allow_untested_optimizer(param_dict)
+        self.zero_allow_comm_data_type_fp32 = get_zero_allow_comm_data_type_fp32(param_dict)
 
         self.zero_force_ds_cpu_optimizer = get_zero_force_ds_cpu_optimizer(param_dict)
 

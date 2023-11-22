@@ -242,7 +242,7 @@ def zero_wrapper_for_fp_tensor_constructor(fn: Callable, target_fp_dtype: torch.
             kwargs['device'] = torch.device(get_accelerator().device_name(os.environ["LOCAL_RANK"]))
         tensor: Tensor = fn(*args, **kwargs)
         if tensor.is_floating_point():
-            tensor.data = tensor.data.to(target_fp_dtype)
+            tensor = tensor.to(target_fp_dtype)
 
         return tensor
 
@@ -286,6 +286,9 @@ def free_param(param: Parameter) -> None:
         # need to make sure that we don't free the parameter while it is still
         # being used for computation
         if not get_accelerator().is_synchronized_device():
+            # TODO SW-163871: remove the below WA once SW-154947 is resolved, solves OOM.
+            if get_accelerator().device_name() == "hpu" and get_accelerator().is_zero3_sync_mark_step_req():
+                get_accelerator().synchronize()
             param.data.record_stream(get_accelerator().current_stream())
     # param.data doesn't store anything meaningful in partitioned state
     param.data = torch.empty(0, dtype=param.dtype, device=param.device)
@@ -847,8 +850,6 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 f'zero.Init: the `config` argument is deprecated. Please use `config_dict_or_path` instead.')
         _ds_config = deepspeed.runtime.config.DeepSpeedConfig(config_dict_or_path,
                                                               mpu) if config_dict_or_path is not None else None
-        if _ds_config is not None:
-            mem_efficient_linear = _ds_config.zero_config.memory_efficient_linear
         super().__init__(enabled=enabled, mem_efficient_linear=mem_efficient_linear, ds_config=_ds_config, dtype=dtype)
         if not dist.is_initialized():
             init_distributed()
@@ -889,8 +890,12 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
         # Local device is the device where the parameters are consumed, must be default device.
         # It is the device where parameters are fully instantiated using allgather
-        self.local_device = torch.device(get_accelerator().device_name(os.environ["LOCAL_RANK"]))
-        get_accelerator().set_device(self.local_device)
+        # todo SW-143933 remove the below HPU wa for torch.device initialization, ticket SW-143931 has to be solved.
+        if get_accelerator().device_name() == "hpu":
+            self.local_device = torch.device("hpu")
+        else:
+            self.local_device = torch.device(get_accelerator().device_name(os.environ["LOCAL_RANK"]))
+            get_accelerator().set_device(self.local_device)
 
         self.quantized_weights = zero_quantized_weights
         if _ds_config is not None and _ds_config.zero_config.zero_quantized_weights and not self.quantized_weights:
@@ -1058,6 +1063,10 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
             # fetches from nvme if the partition is not available and in nvme
             self._ensure_availability_of_partitioned_params(params)
+
+            quant = self.quantized_weights
+            if self.module is not None and self.module.training is False:
+                quant = False
 
             if self.num_partitions == 1:
                 return _no_gather_coalesced(params)
@@ -1594,7 +1603,8 @@ class Init(InsertPostInitMethodToModuleSubClasses):
             f'After allocate allgather param {debug_param2name_id_shape_status(param)} {aligned_param_size} {partition_size} ',
             force=False)
 
-        get_accelerator().synchronize()
+        if not get_accelerator().device_name() == "hpu":
+            get_accelerator().synchronize()
 
         print_rank_0(
             f"{'--'* hierarchy}----allgather param with {debug_param2name_id_shape_status(param)} partition size={partition_size}"
@@ -1727,7 +1737,8 @@ class Init(InsertPostInitMethodToModuleSubClasses):
             param.data = gathered_tensor.narrow(0, 0, param.ds_numel).view(param.ds_shape).data
 
         # guarantee the communication to be completed
-        get_accelerator().synchronize()
+        if not get_accelerator().device_name() == "hpu":
+            get_accelerator().synchronize()
 
         return None
 

@@ -29,7 +29,6 @@ class TestDataLoaderDropLast(DistributedTest):
     def test(self, train_batch_size, drop_last):
         config_dict = {"train_batch_size": train_batch_size, "dataloader_drop_last": drop_last, "steps_per_print": 1}
         hidden_dim = 10
-
         model = SimpleModel(hidden_dim)
         optimizer = torch.optim.AdamW(params=model.parameters())
         # TODO: no way to set DeepSpeedEngine.deepspeed_io params, need to use

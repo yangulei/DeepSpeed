@@ -21,9 +21,13 @@ import deepspeed.comm as dist
 import pytest
 from _pytest.outcomes import Skipped
 from _pytest.fixtures import FixtureLookupError, FixtureFunctionMarker
+from unit.hpu import *
 
 # Worker timeout for tests that hang
 DEEPSPEED_TEST_TIMEOUT = 600
+
+# Worker timeout for tests that hang
+DEEPSPEED_TEST_TIMEOUT = int(os.environ.get('DEEPSPEED_TEST_TIMEOUT', '600'))
 
 
 def is_rocm_pytorch():
@@ -59,6 +63,10 @@ def get_master_port(base_port=29500, port_range_size=1000):
 
 
 def set_accelerator_visible():
+    # below function relevant for GPU
+    if bool(pytest.use_hpu) == True:
+        return
+
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", None)
     xdist_worker_id = get_xdist_worker_id()
     if xdist_worker_id is None:
@@ -81,6 +89,9 @@ def set_accelerator_visible():
                 match = re.search('Device Type.*GPU', line)
                 if match:
                     num_accelerators += 1
+        elif bool(pytest.use_hpu) == True:
+            hl_smi = subprocess.check_output(['hl-smi', '-Q', 'index', '--format=csv'])
+            num_accelerators = len(hl_smi.decode('utf-8').strip().split('\n')) - 1
         else:
             assert get_accelerator().device_name() == 'cpu'
             cpu_sockets = int(
@@ -151,7 +162,14 @@ class DistributedExec(ABC):
 
         # Set start method to `forkserver` (or `fork`)
         mp.set_start_method('forkserver', force=True)
-
+        if bool(pytest.use_hpu) == True:
+            enable_hpu(True)
+            if self.reuse_dist_env:
+                print("Ignoring reuse_dist_env for hpu")
+                self.reuse_dist_env = False
+        else:
+            enable_hpu(False)
+        mp.set_forkserver_preload(['unit.enable_hpu'])
         # Create process pool or use cached one
         master_port = None
         if self.reuse_dist_env:
@@ -174,9 +192,9 @@ class DistributedExec(ABC):
             # usually means an environment error and the rest of tests will
             # hang (causing super long unit test runtimes)
             pytest.exit("Test hanged, exiting", returncode=0)
-
-        # Tear down distributed environment and close process pools
-        self._close_pool(pool, num_procs)
+        finally:
+            # Tear down distributed environment and close process pools
+            self._close_pool(pool, num_procs)
 
         # If we skipped a test, propagate that to this process
         if any(skip_msgs):
@@ -187,6 +205,7 @@ class DistributedExec(ABC):
         skip_msg = ''
         if not dist.is_initialized():
             """ Initialize deepspeed.comm and execute the user function. """
+            pytest.use_hpu = bool(get_accelerator().device_name() == 'hpu')
             if self.set_dist_env:
                 os.environ['MASTER_ADDR'] = '127.0.0.1'
                 os.environ['MASTER_PORT'] = str(master_port)
@@ -224,6 +243,10 @@ class DistributedExec(ABC):
     def _dist_destroy(self):
         if (dist is not None) and dist.is_initialized():
             dist.barrier()
+            # TODO SW-136999: need to remove the below WA
+            if int(os.getenv("TEST_WAIT_AFTER_BARRIER", 0)) == 1:
+                time.sleep(0.5)
+            # tear down after test completes
             dist.destroy_process_group()
 
     def _close_pool(self, pool, num_procs, force=False):

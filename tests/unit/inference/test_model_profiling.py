@@ -11,6 +11,7 @@ import deepspeed
 from transformers import pipeline
 from unit.common import DistributedTest
 from deepspeed.accelerator import get_accelerator
+from unit.hpu import *
 from deepspeed.ops.op_builder import InferenceBuilder
 
 if not deepspeed.ops.__compatible_ops__[InferenceBuilder.NAME]:
@@ -29,9 +30,13 @@ class TestModelProfiling(DistributedTest):
         dtype = torch.float16
         query = "I am a [MASK] model"
 
+        if bool(pytest.use_hpu) == True:
+            # FP16 is not supported on Gaudi1.
+            if get_hpu_dev_version() == "Gaudi":
+                pytest.skip(f"FP16 tests are not supported by Gaudi1.")
+
         local_rank = int(os.getenv("LOCAL_RANK", "0"))
         world_size = int(os.getenv("WORLD_SIZE", "1"))
-
         pipe = pipeline(task, model, framework="pt", device=get_accelerator().device_name(local_rank))
         pipe.model = deepspeed.init_inference(pipe.model,
                                               dtype=dtype,
@@ -54,5 +59,8 @@ class TestModelProfiling(DistributedTest):
             e2e_times.append((end - start) / 1e6)  # convert ns to ms
             model_times.extend(pipe.model.model_times())
 
-        for e2e_t, model_t in zip(e2e_times, model_times):
-            assert e2e_t >= model_t
+        for count, (e2e_t, model_t) in enumerate(zip(e2e_times, model_times)):
+            print(f"{count=} {e2e_t=} {model_t=}", flush=True)
+
+        for count, (e2e_t, model_t) in enumerate(zip(e2e_times, model_times)):
+            assert e2e_t >= model_t, f"{count=} {e2e_t=} {model_t=}"

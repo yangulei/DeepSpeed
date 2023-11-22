@@ -4,6 +4,7 @@
 # DeepSpeed Team
 
 import torch
+from unit.hpu import *
 from deepspeed.accelerator import get_accelerator
 
 TOLERANCES = None
@@ -27,6 +28,9 @@ def get_dtypes():
     global DTYPES
     if DTYPES is None:
         DTYPES = [torch.float16, torch.float32]
+        if bool(pytest.use_hpu) == True:
+            if get_hpu_dev_version() == "Gaudi":
+                DTYPES = [torch.float32]
         try:
             if get_accelerator().is_bf16_supported():
                 DTYPES.append(torch.bfloat16)

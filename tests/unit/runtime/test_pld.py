@@ -5,11 +5,14 @@
 
 import numpy as np
 import deepspeed
+import torch
+import os
 import pytest
 from deepspeed.runtime.progressive_layer_drop import ProgressiveLayerDrop
 
 from unit.common import DistributedTest
 from unit.simple_model import SimpleModel, PLD_SimpleModel, random_dataloader
+from unit.hpu import *
 
 
 @pytest.mark.parametrize('theta', [0, 0.1, 0.9, 1.0])
@@ -49,11 +52,23 @@ class TestPLDModel(DistributedTest):
             }
         }
         hidden_dim = 10
-
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         model = PLD_SimpleModel(hidden_dim, empty_grad=False)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
 
-        data_loader = random_dataloader(model=model, total_samples=50, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=50,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
 
         for i, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
@@ -90,11 +105,24 @@ class TestNonPLDModel(DistributedTest):
             }
         }
         hidden_dim = 10
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = SimpleModel(hidden_dim, empty_grad=False)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
 
-        data_loader = random_dataloader(model=model, total_samples=1, hidden_dim=hidden_dim, device=model.device)
+        data_loader = random_dataloader(model=model,
+                                        total_samples=1,
+                                        hidden_dim=hidden_dim,
+                                        device=model.device,
+                                        dtype=dtype)
 
         for i, batch in enumerate(data_loader):
             with pytest.raises(TypeError):

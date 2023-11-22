@@ -7,6 +7,8 @@ unit tests for coalesced collectives
 """
 
 import torch
+import os
+import pytest
 import deepspeed.comm as dist
 from deepspeed.runtime.comm.coalesced_collectives import reduce_scatter_coalesced
 from deepspeed.accelerator import get_accelerator
@@ -18,7 +20,11 @@ class TestReduceScatterCoalesced(DistributedTest):
     world_size = 2
 
     def test_single_input(self):
-        input = torch.full((6, ), dist.get_rank(), dtype=torch.half, device=get_accelerator().current_device_name())
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                dtype = torch.float
+        input = torch.full((6, ), dist.get_rank(), dtype=dtype, device=get_accelerator().current_device_name())
 
         (output, ) = reduce_scatter_coalesced([input], dist.get_world_group())
 
@@ -26,7 +32,11 @@ class TestReduceScatterCoalesced(DistributedTest):
         assert torch.allclose(output, torch.full_like(output, 0.5))
 
     def test_two_inputs(self):
-        tensor_kwargs = {"device": get_accelerator().current_device_name(), "dtype": torch.half}
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                dtype = torch.float
+        tensor_kwargs = {"device": get_accelerator().current_device_name(), "dtype": dtype}
         inputs = [
             dist.get_rank() * torch.arange(0, 6, **tensor_kwargs),
             dist.get_rank() * torch.arange(6, 9, **tensor_kwargs),
@@ -50,7 +60,13 @@ class TestReduceScatterCoalescedTensorSmallerThanWorldSize(DistributedTest):
     world_size = 2
 
     def test(self):
-        input = torch.zeros((1, ), dtype=torch.half, device=get_accelerator().current_device_name())
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            import habana_frameworks.torch.hpu as hpu
+            device = 'hpu:' + str(hpu.current_device())
+            if os.getenv("REPLACE_FP16", default=None):
+                dtype = torch.float
+        input = torch.zeros((1, ), dtype=dtype, device=get_accelerator().current_device_name())
 
         (output, ) = reduce_scatter_coalesced([input], dist.get_world_group())
 

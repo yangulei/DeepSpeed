@@ -10,7 +10,7 @@ from unit.common import DistributedTest
 from unit.simple_model import *
 
 from unit.checkpoint.common import checkpoint_correctness_verification
-
+from unit.hpu import *
 import pytest
 
 
@@ -52,11 +52,24 @@ class TestLRSchedulerCheckpoint(DistributedTest):
             }
         }
         hidden_dim = 10
+        fp16 = True
+        zero3_init_dtype = None
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["fp32"] = {"enabled": True}
+                if get_hpu_dev_version() == "Gaudi":
+                    config_dict["communication_data_type"] = 'bfp16'
+                fp16 = False
+                zero3_init_dtype = torch.float32
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         if zero_stage == 3:
             global DeepSpeedZeroOptimizer_Stage3
             from deepspeed.runtime.zero.stage3 import DeepSpeedZeroOptimizer_Stage3
-            with deepspeed.zero.Init():
+            with deepspeed.zero.Init(dtype=zero3_init_dtype):
                 models = [SimpleModel(hidden_dim, empty_grad=False) for _ in range(2)]
         else:
             models = [SimpleModel(hidden_dim, empty_grad=False) for _ in range(2)]
@@ -66,7 +79,8 @@ class TestLRSchedulerCheckpoint(DistributedTest):
                                             hidden_dim,
                                             tmpdir,
                                             load_optimizer_states=False,
-                                            load_lr_scheduler_states=True)
+                                            load_lr_scheduler_states=True,
+                                            fp16=fp16)
 
     def test_checkpoint_no_lr_scheduler(self, tmpdir, zero_stage, use_cpu_offload):
         if use_cpu_offload and not deepspeed.ops.__compatible_ops__[CPUAdamBuilder.NAME]:
@@ -99,8 +113,22 @@ class TestLRSchedulerCheckpoint(DistributedTest):
         }
         hidden_dim = 10
 
+        fp16 = True
+        zero3_init_dtype = None
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["fp32"] = {"enabled": True}
+                if get_hpu_dev_version() == "Gaudi":
+                    config_dict["communication_data_type"] = 'bfp16'
+                fp16 = False
+                zero3_init_dtype = torch.float32
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
+
         if zero_stage == 3:
-            with deepspeed.zero.Init():
+            with deepspeed.zero.Init(dtype=zero3_init_dtype):
                 models = [SimpleModel(hidden_dim, empty_grad=False) for _ in range(2)]
         else:
             models = [SimpleModel(hidden_dim, empty_grad=False) for _ in range(2)]
@@ -110,4 +138,5 @@ class TestLRSchedulerCheckpoint(DistributedTest):
                                             hidden_dim,
                                             tmpdir,
                                             load_optimizer_states=False,
-                                            load_lr_scheduler_states=False)
+                                            load_lr_scheduler_states=False,
+                                            fp16=fp16)

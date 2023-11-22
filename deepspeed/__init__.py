@@ -18,6 +18,7 @@ try:
 except ImportError:
     HAS_TRITON = False
 
+from .utils import log_dist, OnDevice, logger
 from . import ops
 from . import module_inject
 
@@ -34,7 +35,6 @@ from .runtime.activation_checkpointing import checkpointing
 from .ops.transformer import DeepSpeedTransformerLayer, DeepSpeedTransformerConfig
 from .module_inject import replace_transformer_layer, revert_transformer_layer
 
-from .utils import log_dist, OnDevice, logger
 from .comm.comm import init_distributed
 
 from .runtime import zero
@@ -239,6 +239,10 @@ def _add_core_arguments(parser):
                        action='store_true',
                        help="Run via MPI, this will attempt to discover the necessary variables to initialize torch "
                        "distributed from the MPI environment")
+
+    parser.add_argument("--use_hpu", default=False, action="store_true", help="Run on HPU device")
+
+    parser.add_argument("--no_cuda", action='store_true', help="Whether to use CPU when available")
 
     return parser
 

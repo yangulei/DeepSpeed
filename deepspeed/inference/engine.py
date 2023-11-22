@@ -27,6 +27,8 @@ from ..module_inject.auto_tp import AutoTP
 
 from ..module_inject.replace_policy import generic_policies
 from ..module_inject.auto_tp_model_utils import build_bloom_alibi_tensor, build_mpt_atten_bias_tensor, build_mpt_alibi_tensor
+from ..ops.transformer.inference.ds_attention import DeepSpeedSelfAttention
+from ..model_implementations.transformers.ds_transformer import DeepSpeedTransformerInference
 
 DS_INFERENCE_ENABLED = False
 from torch import nn
@@ -50,6 +52,13 @@ class InferenceEngine(Module):
 
         super().__init__()
 
+        # Have to import here because inference_module is a global, but python
+        # globals only work at the module level and will not be updated unless
+        # we import it each time we init a new inference engine.
+        from ..model_implementations.transformers.ds_transformer import inference_module
+        if inference_module is not None:
+            self.destroy()
+
         self.module = model
         self._config = config
 
@@ -61,6 +70,10 @@ class InferenceEngine(Module):
 
         if hasattr(self.module, "config"):
             TransformerPolicy.hf_model_config = self.module.config
+
+        if get_accelerator().device_name() == 'hpu':
+            if config.dtype == torch.half and not get_accelerator().is_fp16_supported():
+                raise ValueError("Type fp16 is not supported.")
 
         # todo: keep this self.injection_dict because we don't use to change config.injection_policy API
         # todo: this will get changed when Molly's PR on auto injection dict is merged
@@ -161,18 +174,36 @@ class InferenceEngine(Module):
                     self._apply_injection_policy(config, client_module)
 
         device = get_accelerator().current_device_name()
-        self.module.to(device)
+        model_meta_device = self.module.device.type == 'meta' if hasattr(self.module, "device") else False
+        if model_meta_device:
+            self.module.to_empty(device=device)
+        else:
+            self.module.to(device)
 
         if config.tensor_parallel.tp_size > 1:
             _rng_state = get_accelerator().get_rng_state().to(get_accelerator().current_device_name())
             dist.broadcast(_rng_state, 0)
             get_accelerator().set_rng_state(_rng_state.cpu())
 
-        if config.tensor_parallel.tp_size > 1:
+        if config.enable_cuda_graph and get_accelerator().device_name() == 'hpu':
+            import habana_frameworks.torch as ht
+            self.module = ht.hpu.wrap_in_hpu_graph(self.module)
+        elif config.tensor_parallel.tp_size > 1:
             assert not config.enable_cuda_graph, "Cuda graph is not supported for model parallelism"
 
         # Check if local CUDA graphs can be created in replacement modules
         self.local_cuda_graph = self._local_cuda_graph_used(self.module)
+
+    def destroy(self):
+        # Have to import here because inference_module is a global, but python
+        # globals only work at the module level and will not be updated unless
+        # we import it each time we init a new inference engine.
+        from ..model_implementations.transformers.ds_transformer import inference_module
+        DeepSpeedTransformerInference.layer_id = 0
+        DeepSpeedSelfAttention.num_layers = 0
+        if inference_module is not None:
+            inference_module.release_workspace()
+            inference_module = None
 
     def profile_model_time(self, use_cuda_events=True):
         if not self.model_profile_enabled and not self._config.enable_cuda_graph:
@@ -294,7 +325,7 @@ class InferenceEngine(Module):
         if self._config.checkpoint is not None and not isinstance(self._config.checkpoint, (str, dict)):
             raise ValueError(f"checkpoint must be None, str or dict, got {type(self._config.checkpoint)}")
 
-        supported_dtypes = [None, torch.half, torch.int8, torch.float]
+        supported_dtypes = [None, torch.half, torch.int8, torch.float, torch.bfloat16]
         if self._config.dtype not in supported_dtypes:
             raise ValueError(f"{self._config.dtype} not supported, valid dtype: {supported_dtypes}")
 
@@ -562,7 +593,8 @@ class InferenceEngine(Module):
             **kwargs: variable length keyword arguments
         """
         start = None
-        if self.model_profile_enabled and get_accelerator().device_name() == 'cuda' and self._config.enable_cuda_graph:
+        if self.model_profile_enabled and (get_accelerator().device_name() == 'cuda' or get_accelerator().device_name() == 'hpu') and \
+           self._config.enable_cuda_graph:
             get_accelerator().synchronize()
             start = time.time()
 
@@ -597,5 +629,13 @@ class InferenceEngine(Module):
         if num_beams > 1:
             raise NotImplementedError("DeepSpeed does not support `num_beams` > 1, if this is important to you please "
                                       "add your request to: https://github.com/microsoft/DeepSpeed/issues/2506")
+
+        if ("input_ids" in kwargs) and (kwargs["input_ids"].dim() == 2):
+            for input_tensor in kwargs["input_ids"]:
+                tensor_length = input_tensor.shape[-1]
+                if tensor_length > self._config.max_out_tokens:
+                    raise RuntimeError(
+                        f"Input with size {tensor_length} exceeds maximum length of {self._config.max_out_tokens}. Please increase `max_tokens` in the DeepSpeed Inference Config."
+                    )
 
         return self.module.generate(*inputs, **kwargs)

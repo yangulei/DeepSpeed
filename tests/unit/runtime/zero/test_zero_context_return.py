@@ -7,10 +7,12 @@ from types import SimpleNamespace
 import torch
 import pytest
 import deepspeed
+import os
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 
 from utils import setup_serial_env
 from unit.common import DistributedTest
+from unit.hpu import *
 
 
 class DanglingBias(torch.nn.Linear):
@@ -137,12 +139,21 @@ class TestReturnParam(DistributedTest):
         setup_serial_env()
 
         net = DanglingExt()
-
+        dtype = torch.float16
+        if bool(pytest.use_hpu) == True:
+            use_hpu = True
+            if os.getenv("REPLACE_FP16", default=None):
+                config["fp16"]["enabled"] = False
+                config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config)
+            if not hpu_flag:
+                pytest.skip(msg)
         args = SimpleNamespace(local_rank=0)
         engine, _, _, _ = deepspeed.initialize(args=args, model=net, model_parameters=net.parameters(), config=config)
 
         for _ in range(5):
-            input = torch.rand(net.dim).to(engine.device).half()
+            input = torch.rand(net.dim).to(engine.device).to(dtype)
             loss = engine(input)
             engine.backward(loss)
             engine.step()
@@ -151,14 +162,23 @@ class TestReturnParam(DistributedTest):
     def test_ext_param_returnobj(self):
         setup_serial_env()
         print()
-
+        dtype = torch.float16
+        if bool(pytest.use_hpu) == True:
+            use_hpu = True
+            if os.getenv("REPLACE_FP16", default=None):
+                config["fp16"]["enabled"] = False
+                config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config)
+            if not hpu_flag:
+                pytest.skip(msg)
         net = ModelContainer(return_obj=True)
 
         args = SimpleNamespace(local_rank=0)
         engine, _, _, _ = deepspeed.initialize(args=args, model=net, model_parameters=net.parameters(), config=config)
 
         for _ in range(5):
-            input = torch.rand(net.dim).to(engine.device).half()
+            input = torch.rand(net.dim).to(engine.device).to(dtype)
             loss = engine(input)
             assert len(net._external_params) == 1
             assert len(net.dangler._external_params) == 0
@@ -169,14 +189,23 @@ class TestReturnParam(DistributedTest):
     def test_stage_3_output_type(self, output_type):
         setup_serial_env()
         print()
-
+        dtype = torch.float16
+        if bool(pytest.use_hpu) == True:
+            use_hpu = True
+            if os.getenv("REPLACE_FP16", default=None):
+                config["fp16"]["enabled"] = False
+                config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config)
+            if not hpu_flag:
+                pytest.skip(msg)
         net = ModelContainerVariableOutputType(output_type=output_type)
 
         args = SimpleNamespace(local_rank=0)
         engine, _, _, _ = deepspeed.initialize(args=args, model=net, model_parameters=net.parameters(), config=config)
 
         for _ in range(1):
-            input = torch.rand(net.dim).to(engine.device).half()
+            input = torch.rand(net.dim).to(engine.device).to(dtype)
             loss = engine(input)
             if loss is not None:
                 if isinstance(loss, dict):

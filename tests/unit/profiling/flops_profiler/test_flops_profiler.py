@@ -6,6 +6,7 @@
 import torch
 import pytest
 import deepspeed
+import os
 from deepspeed.profiling.flops_profiler import get_model_profile
 from unit.simple_model import SimpleModel, random_dataloader
 from unit.common import DistributedTest
@@ -14,6 +15,7 @@ from deepspeed.accelerator import get_accelerator
 
 if torch.half not in get_accelerator().supported_dtypes():
     pytest.skip(f"fp16 not supported, valid dtype: {get_accelerator().supported_dtypes()}", allow_module_level=True)
+from unit.hpu import *
 
 pytestmark = pytest.mark.skipif(not required_torch_version(min_version=1.3),
                                 reason='requires Pytorch version 1.3 or above')
@@ -82,6 +84,16 @@ class TestFlopsProfiler(DistributedTest):
                 "top_modules": 3,
             },
         }
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
+
         hidden_dim = 10
         model = SimpleModel(hidden_dim, empty_grad=False)
 
@@ -91,7 +103,7 @@ class TestFlopsProfiler(DistributedTest):
                                         total_samples=50,
                                         hidden_dim=hidden_dim,
                                         device=model.device,
-                                        dtype=torch.half)
+                                        dtype=dtype)
         for n, batch in enumerate(data_loader):
             loss = model(batch[0], batch[1])
             model.backward(loss)

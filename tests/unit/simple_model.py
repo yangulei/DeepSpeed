@@ -181,7 +181,6 @@ class LinearStackPipe(PipelineModule):
             layers.append(LayerSpec(torch.nn.Linear, self.hidden_dim, self.hidden_dim, bias=False))
             layers.append(lambda x: x)
         layers.append(LayerSpec(torch.nn.Linear, self.hidden_dim, self.output_dim))
-
         super().__init__(layers=layers, loss_fn=torch.nn.CrossEntropyLoss(), **kwargs)
 
 

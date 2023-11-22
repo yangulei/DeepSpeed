@@ -19,6 +19,9 @@
 #include "cuda.h"
 #include "custom_cuda_layers.h"
 typedef __half ds_half_precision_t;
+#elif defined(__BFLOAT16__)
+#include <torch/torch.h>
+#define ds_half_precision_t at::BFloat16
 #else
 #include <cmath>
 typedef unsigned short ds_half_precision_t;
@@ -235,6 +238,7 @@ void Adam_Optimizer::Step_AVX(size_t* rounded_size,
             simd_store<span>(_exp_avg + i, momentum_4, false);
             simd_store<span>(_exp_avg_sq + i, variance_4, false);
         }
+// Params are updated only in case of float16, which is currently not supported on HPU
 #if defined(__ENABLE_CUDA__)
         if (dev_params) {
             if (half_precision)

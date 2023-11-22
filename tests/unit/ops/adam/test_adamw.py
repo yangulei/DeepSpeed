@@ -6,11 +6,12 @@
 import deepspeed
 import torch
 import pytest
-
+import os
 from deepspeed.ops.adam import FusedAdam
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 from unit.common import DistributedTest
 from unit.simple_model import SimpleModel
+from unit.hpu import *
 from deepspeed.accelerator import get_accelerator
 
 if torch.half not in get_accelerator().supported_dtypes():
@@ -67,6 +68,13 @@ class TestAdamConfigs(DistributedTest):
                 "cpu_offload": zero_offload
             }
         }
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config_dict["fp16"]["enabled"] = False
+                config_dict["fp32"] = {"enabled" : True}
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         model = SimpleModel(10)
         model, _, _, _ = deepspeed.initialize(config=config_dict,
                                               model=model,

@@ -3,11 +3,13 @@
 
 # DeepSpeed Team
 
+import pytest
 import torch
 import deepspeed
 from pytest import approx
 from unit.common import DistributedTest
 from unit.multi_output_model import MultiOutputModel, multi_output_dataloader
+from unit.hpu import *
 
 
 class TestTwoOutputModel(DistributedTest):
@@ -32,10 +34,14 @@ class TestTwoOutputModel(DistributedTest):
                 "enabled": True
             }
         }
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         hidden_dim = 10
         weight_value = 0.1
-
         model = MultiOutputModel(hidden_dim, weight_value)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
         total_samples = 4
@@ -44,7 +50,8 @@ class TestTwoOutputModel(DistributedTest):
                                               hidden_dim=hidden_dim,
                                               device=model.device,
                                               inputs=[1.0, 2.0],
-                                              targets=[1, 2])
+                                              targets=[1, 2],
+                                              dtype=dtype)
         for n, batch in enumerate(data_loader):
             assert len(batch) % 2 == 0, \
                  f"multi_output_dataloader failed to return even number of data samples (input+target)"
@@ -53,7 +60,7 @@ class TestTwoOutputModel(DistributedTest):
             inputs, targets = batch[:midpoint], batch[midpoint:]
             loss_tuple = model(inputs, targets)
 
-            expected_loss = torch.tensor(2.302734375, dtype=torch.half, device=model.device)
+            expected_loss = torch.tensor(2.302734375, dtype=dtype, device=model.device)
             for loss in loss_tuple:
                 assert loss.shape == torch.Size([])
                 assert loss.item() == approx(expected_loss.item())
@@ -88,6 +95,11 @@ class TestThreeOutputModel(DistributedTest):
                 "enabled": True
             }
         }
+        dtype = torch.half
+        if bool(pytest.use_hpu) == True:
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         hidden_dim = 10
         weight_value = 0.1
@@ -101,7 +113,8 @@ class TestThreeOutputModel(DistributedTest):
                                               hidden_dim=hidden_dim,
                                               device=model.device,
                                               inputs=[1.0, 2.0, 3.0],
-                                              targets=[1, 2, 3])
+                                              targets=[1, 2, 3],
+                                              dtype=dtype)
         for n, batch in enumerate(data_loader):
             assert len(batch) % 2 == 0, \
                  f"multi_output_dataloader failed to return even number of data samples (input+target)"
@@ -111,7 +124,7 @@ class TestThreeOutputModel(DistributedTest):
             loss_tuple = model(inputs, targets)
             assert len(loss_tuple) == 3
 
-            expected_loss = torch.tensor(2.302734375, dtype=torch.half, device=model.device)
+            expected_loss = torch.tensor(2.302734375, dtype=dtype, device=model.device)
 
             for loss in loss_tuple:
                 assert loss.shape == torch.Size([])

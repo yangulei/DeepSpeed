@@ -6,7 +6,7 @@
 import torch
 import deepspeed
 from unit.common import DistributedTest
-
+from unit.hpu import *
 import deepspeed.utils.groups as groups
 
 
@@ -43,7 +43,10 @@ class TestSparseAdam(DistributedTest):
 
     def test(self):
         config_dict = {"train_batch_size": 2, "steps_per_print": 1, "sparse_gradients": True}
-
+        if bool(pytest.use_hpu) == True:
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
         model = Model()
         optimizer = Adam(list(model.linear.parameters()), list(model.emb.parameters()))
         engine, _, _, _ = deepspeed.initialize(model=model, optimizer=optimizer, config=config_dict)

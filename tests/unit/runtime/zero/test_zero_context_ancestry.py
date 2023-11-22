@@ -5,9 +5,11 @@
 
 import torch
 import deepspeed
+import pytest
+import os
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from deepspeed.accelerator import get_accelerator
-
+from unit.hpu import *
 from utils import setup_serial_env
 from unit.common import DistributedTest
 
@@ -67,7 +69,16 @@ class TestSerialParamInit(DistributedTest):
 
     def test_subclass_param_init(self):
         setup_serial_env()
-        with deepspeed.zero.Init(config=config):
+        dtype = None
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                config["fp16"]["enabled"] = False
+                config["bf16"] = {"enabled": True}
+                dtype = torch.bfloat16
+            hpu_flag, msg = is_hpu_supported(config)
+            if not hpu_flag:
+                pytest.skip(msg)
+        with deepspeed.zero.Init(config=config, dtype=dtype):
             model = Son().cpu()
 
         # test that all params have been partitioned
@@ -107,7 +118,14 @@ class TestDSInitWZinit(DistributedTest):
             def magic(self):
                 return 42
 
-        with deepspeed.zero.Init():
+        dtype = torch.float16
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                dtype = torch.float32
+            hpu_flag, msg = is_hpu_supported(ds_config)
+            if not hpu_flag:
+                pytest.skip(msg)
+        with deepspeed.zero.Init(dtype=dtype):
             model = Model()
             engine, *_ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
         assert engine.magic() == 42

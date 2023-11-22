@@ -9,6 +9,7 @@ from unit.common import DistributedTest
 from deepspeed.git_version_info import version as ds_version
 import os
 from unit.simple_model import SimpleModel
+from unit.hpu import *
 from deepspeed.ops.op_builder import FusedAdamBuilder
 
 if not deepspeed.ops.__compatible_ops__[FusedAdamBuilder.NAME]:
@@ -172,6 +173,10 @@ class TestNonElasticBatchParams(DistributedTest):
             }
         }
         hidden_dim = 10
+        if bool(pytest.use_hpu) == True:
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = SimpleModel(hidden_dim, empty_grad=False)
 
@@ -205,6 +210,10 @@ class TestNonElasticBatchParamsWithOverride(DistributedTest):
             }
         }
         hidden_dim = 10
+        if bool(pytest.use_hpu) == True:
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = SimpleModel(hidden_dim, empty_grad=False)
         model, _, _, _ = deepspeed.initialize(config=config_dict, model=model, model_parameters=model.parameters())
@@ -235,11 +244,16 @@ class TestElasticConfigChanged(DistributedTest):
                 "ignore_non_elastic_batch_info": True
             }
         }
-        import json, os
+        import json
+        import os
         scheduler_elastic_config = config_dict.copy()
         scheduler_elastic_config["elasticity"]["max_train_batch_size"] = 27
         os.environ['DEEPSPEED_ELASTICITY_CONFIG'] = json.dumps(scheduler_elastic_config)
         hidden_dim = 10
+        if bool(pytest.use_hpu) == True:
+            hpu_flag, msg = is_hpu_supported(config_dict)
+            if not hpu_flag:
+                pytest.skip(msg)
 
         model = SimpleModel(hidden_dim, empty_grad=False)
 

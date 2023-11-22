@@ -69,9 +69,11 @@ class TestPipeModuleSequential(DistributedTest):
         base_output = base_output
         base_params = sum(p.numel() for p in base_model.parameters())
 
+        device = 'cuda'
+        if bool(pytest.use_hpu) == True:
+            device = 'hpu'
         pipe_model = copy.deepcopy(sequential_model)
         pipe_model = PipelineModule(layers=pipe_model, num_stages=2)
-
         # Ensure all parameters are accounted for.
         my_params = sum(p.numel() for p in pipe_model.parameters())
         total_pipe_params = torch.LongTensor([my_params]).to(get_accelerator().device_name())

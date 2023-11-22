@@ -7,6 +7,7 @@ import torch
 import numpy as np
 import pytest
 from cpuinfo import get_cpu_info
+import os
 
 import deepspeed
 from deepspeed.accelerator import get_accelerator
@@ -15,7 +16,7 @@ from deepspeed.ops.op_builder import CPUAdamBuilder
 from unit.common import DistributedTest
 
 if not deepspeed.ops.__compatible_ops__[CPUAdamBuilder.NAME]:
-    pytest.skip("cpu-adam is not compatible", allow_module_level=True)
+    pytestmark = pytest.mark.skip(reason="cpu-adam is not compatible")
 
 pytest.cpu_vendor = get_cpu_info()["vendor_id_raw"].lower()
 
@@ -65,6 +66,8 @@ class TestCPUAdam(DistributedTest):
     def test_fused_adam_equal(self, dtype, model_size):
         if ("amd" in pytest.cpu_vendor) and (dtype == torch.half):
             pytest.skip("cpu-adam with half precision not supported on AMD CPUs")
+        if dtype == torch.float16 and bool(pytest.use_hpu) == True and os.getenv("REPLACE_FP16", default=None):
+            dtype = torch.bfloat16
 
         from deepspeed.ops.adam import DeepSpeedCPUAdam
 
@@ -79,7 +82,11 @@ class TestCPUAdam(DistributedTest):
         #             verbose=True)
 
         cpu_optimizer = DeepSpeedCPUAdam([cpu_param])
-        cuda_optimizer = FusedAdam([cuda_param])
+        if pytest.use_hpu:
+            from habana_frameworks.torch.hpex.optimizers import FusedAdamW
+            cuda_optimizer = FusedAdamW([cuda_param])
+        else:
+            cuda_optimizer = FusedAdam([cuda_param])
 
         _compare_optimizers(model_size=model_size,
                             param1=cpu_param,
@@ -91,6 +98,8 @@ class TestCPUAdam(DistributedTest):
         if get_accelerator().is_available():
             if ("amd" in pytest.cpu_vendor) and (dtype == torch.half):
                 pytest.skip("cpu-adam with half precision not supported on AMD CPUs")
+            if dtype == torch.float16 and bool(pytest.use_hpu) == True and os.getenv("REPLACE_FP16", default=None):
+                dtype = torch.bfloat16
             ref_param_device = get_accelerator().device_name()
         else:
             if dtype == torch.half:

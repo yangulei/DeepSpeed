@@ -14,7 +14,7 @@ from deepspeed.ops.op_builder import OpBuilder
 from deepspeed.utils import safe_get_full_grad
 import numpy.testing as npt
 from unit.common import DistributedTest
-
+from unit.hpu import *
 from transformers import (AutoConfig, AutoTokenizer, AutoModelForCausalLM)
 
 rocm_version = OpBuilder.installed_rocm_version()
@@ -121,7 +121,10 @@ class TestHybridEngineLoRA(DistributedTest):
         model_config.dropout = 0.0
         model = AutoModelForCausalLM.from_pretrained(model_name, config=model_config)
         model = model.half()
-        model = model.to(f'cuda:{local_rank}')
+        device = 'cuda'
+        if bool(pytest.use_hpu) == True:
+            device = 'hpu'
+        model = model.to(f'{device}:{local_rank}')
         return model
 
     def get_tokenizer(self, model_name):
@@ -176,6 +179,13 @@ class TestHybridEngineLoRA(DistributedTest):
             }
         }
 
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                ds_config["fp16"]["enabled"] = False
+                ds_config["bf16"] = {"enabled": True}
+            hpu_flag, msg = is_hpu_supported(ds_config)
+            if not hpu_flag:
+                pytest.skip(msg)
         model, *_ = deepspeed.initialize(model=model, config=ds_config)
 
         # Verify gradient norm is larger than 0
@@ -186,7 +196,10 @@ class TestHybridEngineLoRA(DistributedTest):
 
         model.train()
         batch = tokenizer(train_sentences, max_length=16, padding="max_length", truncation=True, return_tensors="pt")
-        batch = to_device(batch, f'cuda:{local_rank}')
+        device = 'cuda'
+        if bool(pytest.use_hpu) == True:
+            device = 'hpu'
+        batch = to_device(batch, f'{device}:{local_rank}')
         batch["labels"] = batch["input_ids"]
         outputs = model(**batch, use_cache=False)
         loss = outputs.loss

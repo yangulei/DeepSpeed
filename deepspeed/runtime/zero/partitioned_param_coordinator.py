@@ -122,7 +122,7 @@ class PartitionedParameterCoordinator:
         # mechanism which doesn't require any configuration by the user.
         self.__ongoing_fetch_events: Deque[get_accelerator().Event] = collections.deque()
         # TODO. make this configurable via JSON
-        self.__max_ongoing_fetch_events: int = 2
+        self.__max_ongoing_fetch_events: int = 2 if get_accelerator().device_name() != "hpu" else -1
         self.__profiler = PartitionedParameterProfiler(timers if ENABLE_PROFILER else None)
 
     """Tracing and Tracking
@@ -297,12 +297,12 @@ class PartitionedParameterCoordinator:
                 with get_accelerator().stream(self.__allgather_stream):
                     while self.__ongoing_fetch_events and self.__ongoing_fetch_events[0].query():
                         self.__ongoing_fetch_events.popleft()
-                    if len(self.__ongoing_fetch_events) > self.__max_ongoing_fetch_events:
+                    if len(self.__ongoing_fetch_events) > self.__max_ongoing_fetch_events > -1:
                         self.__ongoing_fetch_events.popleft().synchronize()
 
                     self.__inflight_param_registry.pop(param).wait()
 
-                    if not get_accelerator().is_synchronized_device():
+                    if not get_accelerator().is_synchronized_device() and self.__max_ongoing_fetch_events > -1:
                         event = get_accelerator().Event()
                         event.record()
                         self.__ongoing_fetch_events.append(event)
@@ -438,7 +438,6 @@ class PartitionedParameterCoordinator:
                 all_gather_numel += param.ds_numel
 
         if partitioned_params:
-            partitioned_params
             self.__n_available_params += all_gather_numel
             with get_accelerator().stream(self.__allgather_stream):
                 event_name = __class__.FORWARD_ALL_GATHER if forward else __class__.BACKWARD_ALL_GATHER

@@ -8,6 +8,7 @@ import torch
 import pytest
 import deepspeed
 from deepspeed.ops.op_builder import OpBuilder
+from unit.hpu import *
 from unit.common import DistributedTest
 from deepspeed.accelerator import get_accelerator
 
@@ -39,8 +40,13 @@ class TestHybridEngineTextGen(DistributedTest):
         model_config = AutoConfig.from_pretrained(model_name)
         model_config.dropout = 0.0
         model = AutoModelForCausalLM.from_pretrained(model_name, config=model_config)
-        model = model.half()
-        model = model.to(f'{get_accelerator().device_name()}:{local_rank}')
+        dev = get_accelerator().device_name()
+        dtype = torch.float16
+        if dev == 'hpu':
+            if os.getenv("REPLACE_FP16", default=None):
+                dtype = torch.bfloat16
+        model = model.to(dtype=dtype)
+        model = model.to(f'{dev}:{local_rank}')
         return model
 
     def get_tokenizer(self, model_name):
@@ -66,8 +72,15 @@ class TestHybridEngineTextGen(DistributedTest):
         base_out = self._generate(model, tokenizer, prompt)
 
         ds_config = {"train_batch_size": 1, "fp16": {"enabled": True}, "hybrid_engine": {"enabled": True}}
-        model, *_ = deepspeed.initialize(model=model, config=ds_config)
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                ds_config["fp16"]["enabled"] = False
+                ds_config["bf16"] = {"enabled": True}
+            hpu_flag, msg = is_hpu_supported(ds_config)
+            if not hpu_flag:
+                pytest.skip(msg)
 
+        model, *_ = deepspeed.initialize(model=model, config=ds_config)
         model.eval()
         ds1_out = self._generate(model, tokenizer, prompt)
         assert base_out == ds1_out, f"base_out: {base_out}, ds1_out: {ds1_out}"
@@ -83,6 +96,13 @@ class TestHybridEngineTextGen(DistributedTest):
         prompt = self.get_prompt(batch_size)
 
         ds_config = {"train_batch_size": 1, "fp16": {"enabled": True}, "hybrid_engine": {"enabled": True}}
+        if bool(pytest.use_hpu) == True:
+            if os.getenv("REPLACE_FP16", default=None):
+                ds_config["fp16"]["enabled"] = False
+                ds_config["bf16"] = {"enabled": True}
+            hpu_flag, msg = is_hpu_supported(ds_config)
+            if not hpu_flag:
+                pytest.skip(msg)
         model, *_ = deepspeed.initialize(model=model, config=ds_config)
 
         model.eval()
